@@ -126,10 +126,12 @@ C<Net::EPP::Server> inherits from L<Net::Server> I<(specifically
 L<Net::Server::PreFork>)>, and so the C<run()> method accepts all the parameters
 supported by that module, plus the following:
 
-=over * C<handlers>, which is a hashref which maps events (including EPP
+=over
+
+=item * C<handlers>, which is a hashref which maps events (including EPP
 commands) to callback functions. See below for details.
 
-=over * C<client_ca_file>, which is the location on disk of a file which can be
+=item * C<client_ca_file>, which is the location on disk of a file which can be
 use to validate client certificates.
 
 =back
