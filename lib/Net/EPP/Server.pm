@@ -8,10 +8,15 @@ use Digest::SHA qw(sha512_hex);
 use IO::Socket::SSL;
 use List::Util qw(any none);
 use Mozilla::CA;
+use Net::EPP 0.27;
 use Net::EPP::Frame;
 use Net::EPP::Protocol;
 use Net::EPP::ResponseCodes;
+use No::Worries::DN qw(dn_parse);
+use Socket;
+use Socket6;
 use Sys::Hostname;
+use Time::HiRes qw(ualarm);
 use XML::LibXML;
 use base qw(Net::Server::PreFork);
 use bytes;
@@ -28,9 +33,14 @@ use warnings;
     use Net::EPP::Server;
     use Net::EPP::ResponseCodes;
 
+    #
     # these are the objects we want to support
+    #
     my @OBJECTS = qw(domain host contact);
 
+    #
+    # these are the extensions we want to support
+    #
     my @EXTENSIONS = qw(secDNS rgp loginSec allocationToken launch);
 
     #
@@ -81,8 +91,9 @@ use warnings;
 
     #
     # All other handlers work the same. They are passed a hash of arguments and
-    # can return a simple result code, a result code and message, or
-    # a XML::LibXML::Document object.
+    # can return a simple result code, a result code and message, a
+    # XML::LibXML::Document object, or a result code and an array of
+    # XML::LibXML::Element objects.
     #
     sub login_handler {
         my %args = @_;
@@ -131,8 +142,18 @@ supported by that module, plus the following:
 =item * C<handlers>, which is a hashref which maps events (including EPP
 commands) to callback functions. See below for details.
 
-=item * C<client_ca_file>, which is the location on disk of a file which can be
-use to validate client certificates.
+=item * C<timeout> (optional), which is how long (in seconds) to wait for a
+client to send a command before dropping the connection. This parameter may be a
+decimal (e.g. C<3.14>) or an integer (e.g. C<42>). The default timeout is 30
+seconds.
+
+=item * C<client_ca_file> (optional), which is the location on disk of a file
+which can be use to validate client certificates. If this parameter is not
+provided, clients will not be required to use a certificate.
+
+=item * C<xsd_file> (optional), which is the location on disk of an XSD file
+which should be used to validate all frames received from clients. This XSD
+file can include other XSD files using C<E<lt>importE<gt>>.
 
 =back
 
@@ -147,8 +168,15 @@ sub run {
 
     $self->{'epp'} = {
         'handlers'          => delete($args{'handlers'}) || {},
-        'client_ca_file'    => $args{'client_ca_file'},
+        'timeout'           => delete($args{'timeout'})  || 30,
+        'client_ca_file'    => delete($args{'client_ca_file'}),
+        'xsd_file'          => delete($args{'xsd_file'}),
     };
+
+    if ($self->{'epp'}->{'client_ca_file'}) {
+        $args{'SSL_verify_mode'}    = SSL_VERIFY_FAIL_IF_NO_PEER_CERT;
+        $args{'SSL_ca_file'}        = $self->{'epp'}->{'client_ca_file'};
+    }
 
     return $self->SUPER::run(%args);
 }
@@ -176,15 +204,51 @@ sub process_request {
 sub main_loop {
     my ($self, $socket) = @_;
 
-    my $session = {
-        'id' => $self->generate_svTRID,
-    };
+    my $session = $self->init_session($socket);
 
     while (1) {
         my $code = $self->main_loop_iteration($socket, $session);
 
         last if (OK_BYE == $code || $code >= COMMAND_FAILED_BYE);
     }
+}
+
+#
+# This method initialises a new session
+#
+sub init_session {
+    my ($self, $socket) = @_;
+
+    my $session =  {
+        'session_id'    => $self->generate_svTRID,
+        'remote_addr'   => inet_ntop(4 == length($socket->peeraddr) ? AF_INET : AF_INET6, $socket->peeraddr),
+        'remote_port'   => $socket->peerport,
+    };
+
+    if ($socket->peer_certificate) {
+        $session->{'client_cert'} = {
+            'issuer'        => dn_to_hashref($socket->peer_certificate('issuer')),
+            'subject'       => dn_to_hashref($socket->peer_certificate('subject')),
+            'common_name'   => $socket->peer_certificate('commonName'),
+        };
+    };
+
+    return $session;
+}
+
+#
+# this function wraps No::Worries::DN::dn_parse() and returns a hashref instead
+# of an array
+#
+sub dn_to_hashref {
+    my $ref = {};
+
+    foreach (@{dn_parse(shift)}) {
+        my ($k, $v) = split(/=/, $_, 2);
+        $ref->{$k} = $v;
+    }
+
+    return $ref;
 }
 
 #
@@ -195,8 +259,8 @@ sub main_loop {
 sub main_loop_iteration {
     my ($self, $socket, $session) = @_;
 
-    # TODO - add a timeout
-    my $xml = eval { Net::EPP::Protocol->get_frame($socket) };
+    my $xml = $self->get_frame($socket);
+
     return COMMAND_FAILED_BYE if (!$xml);
 
     my $response = $self->process_frame($xml, $session);
@@ -212,6 +276,28 @@ sub main_loop_iteration {
     }
 }
 
+#
+# This method is a low-level wrapper around Net::EPP::Protocol->get_frame()
+# which implements a timeout and exception handler.
+#
+sub get_frame {
+    my ($self, $socket) = @_;
+
+    my $xml;
+
+    eval {
+        local $SIG{ALRM} = sub { die("ALARM\n") };
+
+        ualarm(1000 * 1000 * ($self->{'epp'}->{'timeout'}));
+
+        $xml = Net::EPP::Protocol->get_frame($socket);
+
+        ualarm(0);
+    };
+
+    return ($@ ? undef : $xml);
+}
+
 =pod
 
 =head1 EVENT HANDLERS
@@ -223,8 +309,7 @@ C<commands>.
 =head2 C<frame_received>
 
 Called when a frame has been successfully parsed and validated, but before it
-has been processed. The input frame will be passed as the C<frame> argument. It
-is B<not> called for C<E<lt>helloE<gt>> commands.
+has been processed. The input frame will be passed as the C<frame> argument.
 
 =head2 C<response_prepared>
 
@@ -254,35 +339,46 @@ sub process_frame {
 
     my $frame = $self->parse_frame($xml);
 
-    return $self->generate_error(
-        code    => SYNTAX_ERROR,
-        msg     => 'XML parse error.',
-        svTRID  => $svTRID,
-    ) unless ($frame->isa('XML::LibXML::Document'));
+    if (!$frame->isa('XML::LibXML::Document')) {
+        return $self->generate_error(
+            code    => SYNTAX_ERROR,
+            msg     => 'XML parse error.',
+            svTRID  => $svTRID,
+        );
+    }
 
-    return $self->generate_error(
-        code    => SYNTAX_ERROR,
-        msg     => 'XML schema error.',
-        svTRID  => $svTRID,
-    ) unless ($self->validate_frame($frame));
-
-    return $self->generate_greeting if ('hello' eq $frame->getElementsByTagName('epp')->item(0)->firstChild->localName);
+    if (!$self->validate_frame($frame)) {
+        return $self->generate_error(
+            code    => SYNTAX_ERROR,
+            msg     => 'XML schema error.',
+            svTRID  => $svTRID,
+        );
+    }
 
     eval { $self->run_callback(
         event   => 'frame_received',
         frame   => $frame
     ) };
 
+    my $fcname = $frame->getElementsByTagName('epp')->item(0)->firstChild->localName;
+
+    if ('hello' eq $fcname) {
+        return $self->generate_greeting;
+    }
+
     my $clTRID = $frame->getElementsByTagName('clTRID')->item(0)->textContent;
 
     my $command;
-    if ('command' eq $frame->documentElement->firstChild->localName) {
+
+    if ('command' eq $fcname) {
         $command = $frame->documentElement->firstChild->firstChild->localName;
 
-    } elsif ('extension' eq $frame->documentElement->firstChild->localName) {
+    } elsif ('extension' eq $fcname) {
         $command = 'other';
 
-    } else {
+    }
+
+    if (!$command) {
         return $self->generate_error(
             code    => SYNTAX_ERROR,
             msg     => 'First child element of <epp> is not <command> or <extension>.',
@@ -291,19 +387,23 @@ sub process_frame {
         );
     }
 
-    return $self->generate_error(
-        code    => AUTHENTICATION_ERROR,
-        msg     => 'You are not logged in.',
-        clTRID  => $clTRID,
-        svTRID  => $svTRID,
-    ) if (!defined($session->{'clid'}) && 'login' ne $command);
+    if (!defined($session->{'clid'}) && 'login' ne $command) {
+        return $self->generate_error(
+            code    => AUTHENTICATION_ERROR,
+            msg     => 'You are not logged in.',
+            clTRID  => $clTRID,
+            svTRID  => $svTRID,
+        );
+    }
 
-    return $self->generate_error(
-        code    => AUTHENTICATION_ERROR,
-        msg     => 'You are already logged in.',
-        clTRID  => $clTRID,
-        svTRID  => $svTRID,
-    ) if (defined($session->{'clid'}) && 'login' eq $command);
+    if (defined($session->{'clid'}) && 'login' eq $command) {
+        return $self->generate_error(
+            code    => AUTHENTICATION_ERROR,
+            msg     => 'You are already logged in.',
+            clTRID  => $clTRID,
+            svTRID  => $svTRID,
+        );
+    }
 
     if ('logout' eq $command) {
         eval { $self->run_callback(event => 'session_closed', session => $session) };
@@ -359,12 +459,14 @@ sub handle_command {
     #
     # check for an unimplemented command
     #
-    return $self->generate_error(
-        code    => UNIMPLEMENTED_COMMAND,
-        msg     => sprintf('This server does not implement the <%s> command.', $command),
-        clTRID  => $clTRID,
-        svTRID  => $svTRID,
-    ) unless (defined($self->{'epp'}->{'handlers'}->{$command}));
+    if (!defined($self->{'epp'}->{'handlers'}->{$command})) {
+        return $self->generate_error(
+            code    => UNIMPLEMENTED_COMMAND,
+            msg     => sprintf('This server does not implement the <%s> command.', $command),
+            clTRID  => $clTRID,
+            svTRID  => $svTRID,
+        );
+    }
 
     if ('login' ne $command) {
         #
@@ -388,10 +490,7 @@ sub handle_command {
         #
         my $extn = $frame->getElementsByTagName('extension')->item(0);
         if ($extn) {
-            use Data::Dumper;
-            print STDERR Dumper($session);
             foreach my $el ($extn->childNodes) {
-                print STDERR $el->namespaceURI."\n";
                 if (none { $el->namespaceURI eq $_ } @{$session->{'extensions'}}) {
                     return $self->generate_error(
                         code    => UNIMPLEMENTED_EXTENSION,
@@ -434,48 +533,57 @@ provided, C<en> will be used as the only supported language.
 sub generate_greeting {
     my $self = shift;
 
-    state $hello;
+    state ($hello, $frame);
 
+    #
+    # this ensures that the hello handler always receives a valid EPP frame
+    #
     if (!$hello) {
         $hello = XML::LibXML::Document->new;
         $hello->setDocumentElement($hello->createElementNS($Net::EPP::Frame::EPP_URN, 'epp'));
         $hello->documentElement->appendChild($hello->createElement('hello'));
     }
 
-    my $data = $self->run_callback(event => 'hello', frame => $hello);
+    if (!$frame) {
+        my $data = $self->run_callback(event => 'hello', frame => $hello);
 
-    my $frame = XML::LibXML::Document->new;
+        $frame = XML::LibXML::Document->new;
 
-    $frame->setDocumentElement($frame->createElementNS($Net::EPP::Frame::EPP_URN, 'epp'));
-    my $greeting = $frame->documentElement->appendChild($frame->createElement('greeting'));
+        $frame->setDocumentElement($frame->createElementNS($Net::EPP::Frame::EPP_URN, 'epp'));
+        my $greeting = $frame->documentElement->appendChild($frame->createElement('greeting'));
 
-    $greeting->appendChild($frame->createElement('svID'))->appendText($data->{'svID'} || lc(hostname));
-    $greeting->appendChild($frame->createElement('svDate'))->appendText(DateTime->now->strftime('%Y-%m-%dT%H:%M:%S.0Z'));
+        $greeting->appendChild($frame->createElement('svID'))->appendText($data->{'svID'} || lc(hostname));
 
-    my $svcMenu = $greeting->appendChild($frame->createElement('svcMenu'));
-    $svcMenu->appendChild($frame->createElement('version'))->appendText('1.0');
+        # the <svDate> element is populated dynamically
+        $greeting->appendChild($frame->createElement('svDate'))->appendChild($frame->createTextNode(''));
 
-    foreach my $lang (@{$data->{'lang'} || [qw(en)]}) {
-        $svcMenu->appendChild($frame->createElement('lang'))->appendText($lang);
-    }
+        my $svcMenu = $greeting->appendChild($frame->createElement('svcMenu'));
+        $svcMenu->appendChild($frame->createElement('version'))->appendText('1.0');
 
-    foreach my $objURI (@{$data->{'objects'}}) {
-        $svcMenu->appendChild($frame->createElement('objURI'))->appendText($objURI);
-    }
-
-    if (scalar(@{$data->{'extensions'}}) > 0) {
-        my $svcExtension = $svcMenu->appendChild($frame->createElement('svcMenu'));
-
-        foreach my $extURI (@{$data->{'extensions'}}) {
-            $svcExtension->appendChild($frame->createElement('extURI'))->appendText($extURI);
+        foreach my $lang (@{$data->{'lang'} || [qw(en)]}) {
+            $svcMenu->appendChild($frame->createElement('lang'))->appendText($lang);
         }
+
+        foreach my $objURI (@{$data->{'objects'}}) {
+            $svcMenu->appendChild($frame->createElement('objURI'))->appendText($objURI);
+        }
+
+        if (scalar(@{$data->{'extensions'}}) > 0) {
+            my $svcExtension = $svcMenu->appendChild($frame->createElement('svcMenu'));
+
+            foreach my $extURI (@{$data->{'extensions'}}) {
+                $svcExtension->appendChild($frame->createElement('extURI'))->appendText($extURI);
+            }
+        }
+
+        my $dcp = $svcMenu->appendChild($frame->createElement('dcp'));
+        $dcp->appendChild($frame->createElement('access'))->appendChild($frame->createElement('all'));
+        $dcp->appendChild($frame->createElement('statement'))->appendChild($frame->createElement('purpose'))->appendChild($frame->createElement('prov'));
+        $dcp->appendChild($frame->createElement('recipient'))->appendChild($frame->createElement('public'));
+        $dcp->appendChild($frame->createElement('retention'))->appendChild($frame->createElement('legal'));
     }
 
-    my $dcp = $svcMenu->appendChild($frame->createElement('dcp'));
-    $dcp->appendChild($frame->createElement('access'))->appendChild($frame->createElement('all'));
-    $dcp->appendChild($frame->createElement('statement'))->appendChild($frame->createElement('purpose'))->appendChild($frame->createElement('prov'));
-    $dcp->appendChild($frame->createElement('recipient'))->appendChild($frame->createElement('public'));
-    $dcp->appendChild($frame->createElement('retention'))->appendChild($frame->createElement('legal'));
+    $frame->getElementsByTagName('svDate')->item(0)->firstChild->setData(DateTime->now->strftime('%Y-%m-%dT%H:%M:%S.0Z'));
 
     return $frame;
 }
@@ -518,7 +626,7 @@ C<E<lt>commandE<gt>> element and using the C<E<lt>extensionE<gt>> element only),
 C<Net::EPP::Server> also supports the C<other> event which will be called when
 processing such frames.
 
-All command handlers receive a hash or arguments containing the following:
+All command handlers receive a hash containing the following arguments:
 
 =over
 
@@ -544,19 +652,50 @@ information about the session. It contains the following:
 
 =over
 
-=item * C<clid> - the client ID used to log in
+=item * C<session_id> - a unique session ID.
 
-=item * C<lang> - the language specified at login
+=item * C<remote_addr> - the client's remote IP address (IPv4 or IPv6).
 
-=item * C<objects> - the object URI(s) specified at login
+=item * C<remote_port> - the client's remote port.
 
-=item * C<lang> - the extension URI(s) specified at login
+=item * C<clid> - the client ID used to log in.
+
+=item * C<lang> - the language specified at login.
+
+=item * C<objects> - the object URI(s) specified at login.
+
+=item * C<lang> - the extension URI(s) specified at login.
+
+=item * C<client_cert> - information about the client certificate (if any). This
+is a hashref which looks something like this:
+
+    {
+      'issuer' => $dnref,
+      'common_name' => 'example.com',
+      'subject' => $dnref,
+    }
+
+C<$dnref> is a hashref representing the Distinguished Name of the issuer or
+subject and looks like this:
+
+    {
+        'O' => 'Example Inc.',
+        'OU' => 'Registry Services',
+        'emailAddress' => 'registry@example.com',
+        'CN' => 'EPP Server Private CA',
+    }
+
+Other members, such as C<C> (country), C<ST> (state/province), and C<L> (city)
+may also be present.
 
 =back
 
 =head3 RETURN VALUES
 
-=head4 1. Simple result code
+Command handlers can return result information in four different ways that are
+explained below.
+
+=head4 1. SIMPLE RESULT CODE
 
 Command handlers can signal the result of a command by simply passing a single
 integer value. L<Net::EPP::ResponseCodes> may be used to avoid literal integers.
@@ -580,7 +719,7 @@ Example:
 C<Net::EPP::Server> will construct a standard EPP response frame using the result
 code and send it to the client.
 
-=head4 2. Result code + message
+=head4 2. RESULT CODE + MESSAGE
 
 If the command handler returns two values, and the first is a valid result code,
 then the second can be a message. Example:
@@ -602,7 +741,7 @@ then the second can be a message. Example:
 C<Net::EPP::Server> will construct a standard EPP response frame using the result
 code and message, and send it to the client.
 
-=head4 3. Result code + XML elements
+=head4 3. RESULT CODE + XML ELEMENTS
 
 The command handler may return a result code followed by an array of between
 one and three L<XML::LibXML::Element> objects, in any order, representing the
@@ -626,7 +765,7 @@ C<Net::EPP::Server> will construct a standard EPP response frame using the resul
 code and supplied elements which will be imported and inserted into the
 appropriate positions, and send it to the client.
 
-=head4 4. L<XML::LibXML::Document> object
+=head4 4. L<XML::LibXML::Document> OBJECT
 
 A return value that is a single L<XML::LibXML::Document> object will be sent
 back to the client verbatim.
@@ -665,73 +804,101 @@ sub run_command {
         );
     }
 
+    #
+    # the command handler returned nothing
+    #
+    if (0 == scalar(@result)) {
+        return $self->generate_error(
+            code    => COMMAND_FAILED,
+            clTRID  => $clTRID,
+            svTRID  => $svTRID,
+        );
+    }
+
+    #
+    # single return value
+    #
     if (1 == scalar(@result)) {
         my $result = shift(@result);
 
         if ($result->isa('XML::LibXML::Document')) {
             return $result;
+        }
 
-        } elsif (is_error_code($result)) {
+        if (is_error_code($result)) {
             return $self->generate_response(
                 code    => $result,
                 clTRID  => $clTRID,
                 svTRID  => $svTRID,
             );
-
-        } else {
-            carp(sprintf('<%s> command handler did not return a result code or an XML document', $command));
-            return $self->generate_error(
-                code    => COMMAND_FAILED,
-                clTRID  => $clTRID,
-                svTRID  => $svTRID,
-            );
-
         }
 
-    } elsif (is_error_code($result[0])) {
-        my $code = shift(@result);
+        carp(sprintf('<%s> command handler did not return a result code or an XML document', $command));
 
-        if (!ref($result[0])) {
-            return $self->generate_response(
-                code    => $code,
-                msg     => $result[0],
-                clTRID  => $clTRID,
-                svTRID  => $svTRID,
-            );
-
-        } else {
-            my $response = $self->generate_response(
-                code    => $code,
-                clTRID  => $clTRID,
-                svTRID  => $svTRID,
-            );
-
-            my %els;
-            foreach my $el (@result) {
-                if (!$el->isa('XML::LibXML::Element')) {
-                    # TODO
-
-                } elsif (exists($els{$el->localName})) {
-                    # TODO
-
-                } else {
-                    $els{$el->localName} = $el;
-
-                }
-            }
-
-            my $response_el = $response->getElementsByTagName('response')->item(0);
-            foreach my $name (grep { exists($els{$_}) } qw(resData msgQ extension)) {
-                $response_el->appendChild($response->importNode($els{$name}));
-            }
-
-            return $response;
-        }
-
-    } else {
-        # TODO
-
+        return $self->generate_error(
+            code    => COMMAND_FAILED,
+            clTRID  => $clTRID,
+            svTRID  => $svTRID,
+        );
     }
+
+    if (!is_error_code($result[0])) {
+        carp(sprintf('<%s> command handler returned something that is not an error code', $command));
+
+        return $self->generate_error(
+            code    => COMMAND_FAILED,
+            clTRID  => $clTRID,
+            svTRID  => $svTRID,
+        );
+    }
+
+    my $code = shift(@result);
+
+    if (!ref($result[0])) {
+        #
+        # assume that the next member is a string containing a message
+        #
+        return $self->generate_response(
+            code    => $code,
+            msg     => $result[0],
+            clTRID  => $clTRID,
+            svTRID  => $svTRID,
+        );
+    }
+
+    #
+    # generate a basic response that we will then insert elements into
+    #
+    my $response = $self->generate_response(
+        code    => $code,
+        clTRID  => $clTRID,
+        svTRID  => $svTRID,
+    );
+
+    my %els;
+    foreach my $el (@result) {
+        #
+        # anything that isn't an element is ignored
+        #
+        if ($el->isa('XML::LibXML::Element')) {
+            #
+            # if multiple elements with the same local name are present,
+            # the last will clobber any previous elements.
+            #
+            $els{$el->localName} = $el;
+        }
+    }
+
+    my $response_el = $response->getElementsByTagName('response')->item(0);
+
+    #
+    # now append elements in the correct order, if provided
+    #
+    foreach my $name (grep { exists($els{$_}) } qw(resData msgQ extension)) {
+        $response_el->appendChild($response->importNode($els{$name}));
+    }
+
+    return $response;
 }
 
 =pod
@@ -740,7 +907,7 @@ sub run_command {
 
 =head2 C<generate_response(%args)>
 
-This method returns a L<XML::LibXML::Document> element representing the response
+This method returns a L<XML::LibXML::Document> object representing the response
 described by C<%args>, which should contain the following:
 
 =over
@@ -757,6 +924,9 @@ and C<"Command failed."> if C<code> is C<2000> or higher.
 =item * C<svTRID> (OPTIONAL) - the server's transaction ID.
 
 =back
+
+Once created, it is straightforward to modify the object to add, remove or
+change its contents as needed.
 
 =cut
 
@@ -843,14 +1013,21 @@ sub parse_frame {
 
 =head2 C<validate_frame($frame)>
 
-Returns true if C<$frame> can be validated against the XML schema.
+Returns true if C<$frame> can be validated against the XSD file provided in the
+C<xsd_file> parameter.
 
 =cut
 
 sub validate_frame {
     my ($self, $frame) = @_;
 
-    # TODO
+    if ($self->{'epp'}->{'xsd_file'}) {
+        state $xsd = XML::LibXML::Schema->new(location => $self->{'epp'}->{'xsd_file'});
+
+        eval { $xsd->validate($frame) };
+
+        return ($@ ? undef : 1);
+    }
 
     return 1;
 }
