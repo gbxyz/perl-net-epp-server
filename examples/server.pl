@@ -1,6 +1,6 @@
 #!perl
 # ABSTRACT: an example EPP server built using Net::EPP::Server
-use File::Basename qw(basename);
+use File::Basename qw(dirname basename);
 use File::Spec;
 use File::Temp;
 use IPC::Open3;
@@ -92,6 +92,7 @@ $server->run(
     #
     client_ca_file  => $ARGV[0],
     timeout         => 30,
+    xsd_file        => File::Spec->catfile(dirname(__FILE__), qw(xsd epp.xsd)),
 
     handlers => {
         hello       => \&hello_handler,
@@ -113,7 +114,7 @@ sub hello_handler {
         'svID'          => basename(__FILE__),
         'lang'          => [ qw(en) ],
         'objects'       => [ map { Net::EPP::Frame::ObjectSpec->xmlns($_) } qw(domain) ],
-        'extensions'    => [ map { Net::EPP::Frame::ObjectSpec->xmlns($_) } qw(secDNS rgp loginSec allocationToken launch) ],
+        'extensions'    => [ map { Net::EPP::Frame::ObjectSpec->xmlns($_) } qw(secDNS rgp loginSec allocationToken launch ttl) ],
     };
 }
 
