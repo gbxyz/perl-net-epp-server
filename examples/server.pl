@@ -10,6 +10,60 @@ use Sys::Hostname;
 use feature qw(state);
 use strict;
 
+=pod
+
+=head1 SYNOPSIS
+
+    server.pl CAFILE
+
+=head1 INTRODUCTION
+
+C<server.pl> is an example implementation of an EPP server that uses
+L<Net::EPP::Server>.
+
+When started, it will listen on C<localhost> (C<127.0.0.1> and/or C<::1>) on
+port 7000 using a dynamically-generated self-signed certificate.
+
+Its only argument is a path to a CA bundle that is used to validate client
+certificates.
+
+=head1 EVENT HANDLERS
+
+EPP business logic is implemented in the following functions:
+
+=over
+
+=item * C<hello_handler()>
+
+=item * C<login_handler()>
+
+=item * C<poll_handler()>
+
+=item * C<check_handler()>
+
+=item * C<info_handler()>
+
+=item * C<create_handler()>
+
+=item * C<update_handler()>
+
+=item * C<renew_handler()>
+
+=item * C<delete_handler()>
+
+=item * C<transfer_handler()>
+
+=item * C<other_handler()>
+
+=back
+
+=head1 AUTHENTICATION
+
+The C<$users> variable is a hashref which maps client IDs to passwords which are
+stored in plaintext. Since this script is purely illustrative, this is fine.
+
+=cut
+
 my $users = {
     'gavin' => 'foo2bar',
 };
@@ -97,8 +151,40 @@ sub login_handler {
     }
 }
 
+sub poll_handler {
+    return UNIMPLEMENTED_COMMAND;
+}
+
+sub check_handler {
+    return UNIMPLEMENTED_COMMAND;
+}
+
 sub info_handler {
-    return COMMAND_FAILED;
+    return UNIMPLEMENTED_COMMAND;
+}
+
+sub create_handler {
+    return UNIMPLEMENTED_COMMAND;
+}
+
+sub update_handler {
+    return UNIMPLEMENTED_COMMAND;
+}
+
+sub renew_handler {
+    return UNIMPLEMENTED_COMMAND;
+}
+
+sub delete_handler {
+    return UNIMPLEMENTED_COMMAND;
+}
+
+sub transfer_handler {
+    return UNIMPLEMENTED_COMMAND;
+}
+
+sub other_handler {
+    return UNIMPLEMENTED_COMMAND;
 }
 
 #
