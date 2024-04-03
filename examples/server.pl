@@ -1,12 +1,13 @@
 #!perl
 # ABSTRACT: an example EPP server built using Net::EPP::Server
+use File::Basename qw(basename);
 use File::Spec;
 use File::Temp;
 use IPC::Open3;
+use List::Util qw(any);
 use Net::EPP::Frame::ObjectSpec;
 use Net::EPP::ResponseCodes;
 use Net::EPP::Server;
-use Sys::Hostname;
 use feature qw(state);
 use strict;
 
@@ -62,40 +63,54 @@ EPP business logic is implemented in the following functions:
 The C<$users> variable is a hashref which maps client IDs to passwords which are
 stored in plaintext. Since this script is purely illustrative, this is fine.
 
+C<server.pl> implements the Login Security extension, which is mandatory.
+
 =cut
 
 my $users = {
     'gavin' => 'foo2bar',
 };
 
-my ($key, $cert) = auto_ssl();
-
 my $server = Net::EPP::Server->new;
 
+my ($key, $cert) = auto_ssl();
+
 $server->run(
-    'client_ca_file'    => $ARGV[0],
-    'SSL_key_file'      => $key,
-    'SSL_cert_file'     => $cert,
-    'handlers'          => {
-        'hello'         => \&hello_handler,
-        'login'         => \&login_handler,
-        'poll'          => \&poll_handler,
-        'check'         => \&check_handler,
-        'info'          => \&info_handler,
-        'create'        => \&create_handler,
-        'update'        => \&update_handler,
-        'renew'         => \&renew_handler,
-        'delete'        => \&delete_handler,
-        'transfer'      => \&transfer_handler,
-        'other'         => \&other_handler,
+    #
+    # generic options
+    #
+    log_level => 4,
+
+    #
+    # TLS-specific options
+    #
+    SSL_key_file    => $key,
+    SSL_cert_file   => $cert,
+
+    #
+    # Net::EPP::Server-specific options
+    #
+    client_ca_file  => $ARGV[0],
+    timeout         => 30,
+
+    handlers => {
+        hello       => \&hello_handler,
+        login       => \&login_handler,
+        poll        => \&poll_handler,
+        check       => \&check_handler,
+        info        => \&info_handler,
+        create      => \&create_handler,
+        update      => \&update_handler,
+        renew       => \&renew_handler,
+        delete      => \&delete_handler,
+        transfer    => \&transfer_handler,
+        other       => \&other_handler,
     },
 );
 
 sub hello_handler {
-    my %args = @_;
-
     return {
-        'svID'          => lc(hostname),
+        'svID'          => basename(__FILE__),
         'lang'          => [ qw(en) ],
         'objects'       => [ map { Net::EPP::Frame::ObjectSpec->xmlns($_) } qw(domain) ],
         'extensions'    => [ map { Net::EPP::Frame::ObjectSpec->xmlns($_) } qw(secDNS rgp loginSec allocationToken launch) ],
@@ -106,15 +121,17 @@ sub login_handler {
     my %args = @_;
     my $frame = $args{'frame'};
 
-    my $loginSec;
+    my $loginSecURI = Net::EPP::Frame::ObjectSpec->xmlns('loginSec');
 
-    foreach my $el ($frame->getElementsByTagName('extURI')) {
-        if ($el->textContent eq Net::EPP::Frame::ObjectSpec->xmlns('loginSec')) {
-            $loginSec = 1;
-            last;
-        }
-    }
+    #
+    # look for the Login Security extension, it's mandatory
+    #
+    my $loginSec = any { $_->textContent eq $loginSecURI } $frame->getElementsByTagName('extURI');
 
+    #
+    # the Login Security extension URI must be listed and the <pw> element must
+    # contain the magic string
+    #
     if (!$loginSec || '[LOGIN-SECURITY]' ne $frame->getElementsByTagName('pw')->item(0)->textContent) {
         return $server->generate_error(
             code    => AUTHENTICATION_ERROR,
@@ -124,16 +141,7 @@ sub login_handler {
         );
     }
 
-    my %values;
-
-    $values{'clID'} = $frame->getElementsByTagName('clID')->item(0)->textContent;
-
-    foreach my $name (qw(pw newPW)) {
-        my $el = $frame->getElementsByTagNameNS(Net::EPP::Frame::ObjectSpec->xmlns('loginSec'), $name)->item(0);
-        $values{$name} = $el->textContent if ($el);
-    }
-
-    if (exists($values{'newPW'})) {
+    if ($frame->getElementsByTagNameNS($loginSecURI, 'newPW')->size > 0) {
         return $server->generate_error(
             code    => UNIMPLEMENTED_OPTION,
             msg     => 'Changing password is not currently supported.',
@@ -142,13 +150,10 @@ sub login_handler {
         );
     }
 
-    if ($users->{$values{'clID'}} eq $values{'pw'}) {
-        return OK;
+    my $id = $frame->getElementsByTagName('clID')->item(0)->textContent;
+    my $pw = $frame->getElementsByTagNameNS($loginSecURI, 'pw')->item(0)->textContent;
 
-    } else {
-        return AUTHENTICATION_ERROR;
-
-    }
+    return ($users->{$id} eq $pw ? OK : AUTHENTICATION_ERROR);
 }
 
 sub poll_handler {
