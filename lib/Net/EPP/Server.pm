@@ -606,21 +606,23 @@ sub generate_greeting {
         }
 
         if (scalar(@{$data->{'extensions'}}) > 0) {
-            my $svcExtension = $svcMenu->appendChild($frame->createElement('svcMenu'));
+            my $svcExtension = $svcMenu->appendChild($frame->createElement('svcExtension'));
 
             foreach my $extURI (@{$data->{'extensions'}}) {
                 $svcExtension->appendChild($frame->createElement('extURI'))->appendText($extURI);
             }
         }
 
-        my $dcp = $svcMenu->appendChild($frame->createElement('dcp'));
+        my $dcp = $greeting->appendChild($frame->createElement('dcp'));
         $dcp->appendChild($frame->createElement('access'))->appendChild($frame->createElement('all'));
-        $dcp->appendChild($frame->createElement('statement'))->appendChild($frame->createElement('purpose'))->appendChild($frame->createElement('prov'));
-        $dcp->appendChild($frame->createElement('recipient'))->appendChild($frame->createElement('public'));
-        $dcp->appendChild($frame->createElement('retention'))->appendChild($frame->createElement('legal'));
+
+        my $statement = $dcp->appendChild($frame->createElement('statement'));
+        $statement->appendChild($frame->createElement('purpose'))->appendChild($frame->createElement('prov'));
+        $statement->appendChild($frame->createElement('recipient'))->appendChild($frame->createElement('public'));
+        $statement->appendChild($frame->createElement('retention'))->appendChild($frame->createElement('legal'));
     }
 
-    $frame->getElementsByTagName('svDate')->item(0)->firstChild->setData(DateTime->now->strftime('%Y-%m-%dT%H:%M:%S.0Z'));
+    $frame->getElementsByTagName('svDate')->item(0)->firstChild->setData(DateTime->now->strftime('%FT%T.0Z'));
 
     return $frame;
 }
