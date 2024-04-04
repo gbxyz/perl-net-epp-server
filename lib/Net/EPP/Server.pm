@@ -384,7 +384,7 @@ sub process_frame {
         );
     }
 
-    if (!$self->validate_frame($frame)) {
+    if (!$self->is_valid($frame)) {
         return $self->generate_error(
             code    => SYNTAX_ERROR,
             msg     => 'XML schema error.',
@@ -1065,14 +1065,14 @@ sub parse_frame {
 
 =pod
 
-=head2 C<validate_frame($frame)>
+=head2 C<is_valid($frame)>
 
 Returns true if C<$frame> can be validated against the XSD file provided in the
 C<xsd_file> parameter.
 
 =cut
 
-sub validate_frame {
+sub is_valid {
     my ($self, $frame) = @_;
 
     if ($self->{'epp'}->{'xsd_file'}) {
@@ -1080,7 +1080,12 @@ sub validate_frame {
 
         eval { $xsd->validate($frame) };
 
-        return ($@ ? undef : 1);
+        if ($@) {
+            carp($@);
+            return undef;
+        }
+
+        return 1;
     }
 
     return 1;
@@ -1117,7 +1122,7 @@ sub send_frame {
     #
     # note: we need to do a round-trip here otherwise we get namespace issues
     #
-    if (!$self->validate_frame(XML::LibXML->load_xml(string => $frame->toString))) {
+    if (!$self->is_valid(XML::LibXML->load_xml(string => $frame->toString))) {
         carp('Invalid frame sent to client!');
     }
 
