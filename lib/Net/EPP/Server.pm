@@ -2,7 +2,6 @@ package Net::EPP::Server;
 # ABSTRACT: A simple EPP server implementation.
 use Carp;
 use Crypt::OpenSSL::Random;
-use Data::Dumper;
 use DateTime::Format::ISO8601;
 use Digest::SHA qw(sha512_hex);
 use IO::Socket::SSL;
@@ -825,7 +824,7 @@ sub run_command {
             return $result;
         }
 
-        if (is_error_code($result)) {
+        if (is_result_code($result)) {
             return $self->generate_response(
                 code    => $result,
                 clTRID  => $clTRID,
@@ -842,8 +841,8 @@ sub run_command {
         );
     }
 
-    if (!is_error_code($result[0])) {
-        carp(sprintf('<%s> command handler returned something that is not an error code', $command));
+    if (!is_result_code($result[0])) {
+        carp(sprintf('<%s> command handler returned something that is not a result code', $command));
 
         return $self->generate_error(
             code    => COMMAND_FAILED,
@@ -1044,13 +1043,13 @@ sub run_callback {
 
 =pod
 
-=head2 C<is_error_code($value)>
+=head2 C<is_result_code($value)>
 
 Returns true if C<$value> is a recognised EPP result code.
 
 =cut
 
-sub is_error_code {
+sub is_result_code {
     my $value = shift;
     return (int($value) >= OK && int($value) <= 2502);
 }
