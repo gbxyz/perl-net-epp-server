@@ -314,8 +314,8 @@ sub main_loop_iteration {
 }
 
 #
-# This method is a low-level wrapper around Net::EPP::Protocol->get_frame()
-# which implements a timeout and exception handler.
+# This method is a wrapper around Net::EPP::Protocol->get_frame() which
+# implements a timeout and exception handler.
 #
 sub get_frame {
     my ($self, $socket) = @_;
@@ -384,10 +384,12 @@ sub process_frame {
         );
     }
 
-    if (!$self->is_valid($frame)) {
+    my ($code, $msg) = $self->validate_frame($frame);
+
+    if (OK != $code) {
         return $self->generate_error(
-            code    => SYNTAX_ERROR,
-            msg     => 'XML schema error.',
+            code    => $code,
+            msg     => $msg,
             svTRID  => $svTRID,
         );
     }
@@ -1067,12 +1069,12 @@ sub parse_frame {
 
 =head2 C<is_valid($frame)>
 
-Returns true if C<$frame> can be validated against the XSD file provided in the
-C<xsd_file> parameter.
+Returns a result code and optionally a message if C<$frame> cannot be validated
+against the XSD file provided in the C<xsd_file> parameter.
 
 =cut
 
-sub is_valid {
+sub validate_frame {
     my ($self, $frame) = @_;
 
     if ($self->{'epp'}->{'xsd_file'}) {
@@ -1080,25 +1082,23 @@ sub is_valid {
 
         eval { $xsd->validate($frame) };
 
-        if ($@) {
-            carp($@);
-            return undef;
-        }
-
-        return 1;
+        return (SYNTAX_ERROR, $@) if ($@);
     }
 
-    return 1;
+    return OK;
 }
 
+#
+# This method finds the callback for the given event, and if found, runs it and
+# passes back its return value(s).
+#
 sub run_callback {
     my $self = shift;
     my %args = @_;
-    my $event = delete($args{'event'});
 
-    $args{'server'} = $self;
+    $args{'server'} ||= $self;
 
-    my $ref = $self->{'epp'}->{'handlers'}->{$event};
+    my $ref = $self->{'epp'}->{'handlers'}->{$args{'event'}};
 
     return &{$ref}(%args) if ($ref);
 }
@@ -1116,17 +1116,24 @@ sub is_result_code {
     return (int($value) >= OK && int($value) <= 2502);
 }
 
+#
+# This method is a wrapper around Net::EPP::Protocol->send_frame() which
+# validates the response and reports any errors
+#
 sub send_frame {
     my ($self, $socket, $frame) = @_;
 
     #
     # note: we need to do a round-trip here otherwise we get namespace issues
     #
-    if (!$self->is_valid(XML::LibXML->load_xml(string => $frame->toString))) {
-        carp('Invalid frame sent to client!');
+    $frame = XML::LibXML->load_xml(string => $frame->toString);
+
+    my ($code, $msg) = $self->validate_frame($frame);
+    if (OK != $code) {
+        carp($msg);
     }
 
-    Net::EPP::Protocol->send_frame($socket, $frame->toString(1));
+    Net::EPP::Protocol->send_frame($socket, $frame->toString);
 }
 
 1;
