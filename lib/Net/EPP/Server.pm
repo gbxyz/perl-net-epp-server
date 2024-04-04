@@ -669,6 +669,8 @@ All command handlers receive a hash containing the following arguments:
 
 =over
 
+=item * C<$server> - the server.
+
 =item * C<event> - the name of the command.
 
 =item * C<frame> - an L<XML::LibXML::Document> object representing the frame
@@ -847,6 +849,8 @@ sub run_command {
     # the command handler returned nothing
     #
     if (0 == scalar(@result)) {
+        carp(sprintf('<%s> command handler returned nothing', $command));
+
         return $self->generate_error(
             code    => COMMAND_FAILED,
             clTRID  => $clTRID,
@@ -958,6 +962,9 @@ not provided, C<1000> will be used.
 C<"Command completed successfully."> will be used if C<code> is less than C<2000>,
 and C<"Command failed."> if C<code> is C<2000> or higher.
 
+=item * C<resData> (OPTIONAL) - if defined, an empty C<E<lt>resDataE<gt>>
+element will be added to the frame.
+
 =item * C<clTRID> (OPTIONAL) - the client transaction ID.
 
 =item * C<svTRID> (OPTIONAL) - the server's transaction ID.
@@ -988,6 +995,10 @@ sub generate_response {
 
     $result->setAttribute('code', $code);
     $result->appendChild($frame->createElement('msg'))->appendText($msg);
+
+    if ($args{'resData'}) {
+        $response->appendChild($frame->createElement('resData'));
+    }
 
     if ($clTRID || $svTRID) {
         my $trID = $response->appendChild($frame->createElement('trID'));
@@ -1080,6 +1091,8 @@ sub run_callback {
     my %args = @_;
     my $event = delete($args{'event'});
 
+    $args{'server'} = $self;
+
     my $ref = $self->{'epp'}->{'handlers'}->{$event};
 
     return &{$ref}(%args) if ($ref);
@@ -1100,6 +1113,13 @@ sub is_result_code {
 
 sub send_frame {
     my ($self, $socket, $frame) = @_;
+
+    #
+    # note: we need to do a round-trip here otherwise we get namespace issues
+    #
+    if (!$self->validate_frame(XML::LibXML->load_xml(string => $frame->toString))) {
+        carp('Invalid frame sent to client!');
+    }
 
     Net::EPP::Protocol->send_frame($socket, $frame->toString(1));
 }
