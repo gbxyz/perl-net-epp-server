@@ -341,7 +341,10 @@ sub get_frame {
 
 You implement the business logic of your EPP server by specifying callbacks that
 are invoked for certain events. These come in two flavours: I<events> and
-C<commands>.
+I<commands>.
+
+All event handlers receive a hash containing one or more arguments that are
+described below.
 
 =head2 C<frame_received>
 
@@ -359,7 +362,7 @@ C<E<lt>helloE<gt>> and C<E<lt>logoutE<gt>>commands.
 
 C<Net::EPP::Server> takes care of handling session management, but this event
 handler will be called once a C<E<lt>logoutE<gt>> command has been successfully
-processed, but before the client connection has been closed. The C<session>
+processed, and before the client connection has been closed. The C<session>
 argument will contain a hashref of the session (see below).
 
 =cut
@@ -671,7 +674,7 @@ All command handlers receive a hash containing the following arguments:
 
 =over
 
-=item * C<$server> - the server.
+=item * C<server> - the server.
 
 =item * C<event> - the name of the command.
 
@@ -690,8 +693,8 @@ element of the response.
 
 =head3 SESSION PARAMETERS
 
-As mentioned above, the C<$args{session}> parameter is a hashref which contains
-information about the session. It contains the following:
+As mentioned above, the C<session> parameter is a hashref which contains
+information about the session. It contains the following values:
 
 =over
 
@@ -705,12 +708,12 @@ information about the session. It contains the following:
 
 =item * C<lang> - the language specified at login.
 
-=item * C<objects> - the object URI(s) specified at login.
+=item * C<objects> - an arrayref of the object URI(s) specified at login.
 
-=item * C<lang> - the extension URI(s) specified at login.
+=item * C<lang> - an arrayref of the extension URI(s) specified at login.
 
-=item * C<client_cert> - information about the client certificate (if any). This
-is a hashref which looks something like this:
+=item * C<client_cert> - a hashref containing information about the client
+certificate (if any), which looks something like this:
 
     {
       'issuer' => $dnref,
