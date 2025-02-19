@@ -2,7 +2,7 @@ package Net::EPP::Server;
 # ABSTRACT: A simple EPP server implementation.
 use Carp;
 use Crypt::OpenSSL::Random;
-use DateTime::Format::ISO8601;
+use DateTime;
 use Digest::SHA qw(sha512_hex);
 use IO::Socket::SSL;
 use List::Util qw(any none);
