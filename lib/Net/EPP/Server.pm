@@ -146,7 +146,7 @@ our %MESSAGES = (
         } else {
             return OK;
 
-        }  
+        }
     }
 
 =head1 INTRODUCTION
@@ -156,7 +156,7 @@ Provisioning Protocol (EPP)|https://www.rfc-editor.org/info/std69> servers.
 
 It implements the TLS/TCP transport described in L<RFC 5734|https://www.rfc-editor.org/info/rfc5734>,
 and the L<EPP Server State Machine|https://www.rfc-editor.org/rfc/rfc5730.html#:~:text=Figure%201:%20EPP%20Server%20State%20Machine>
-described in Section 2 of L<RFC 5730|https://www.rfc-editor.org/rfc/rfc5730.html>.
+described in L<Section 2 of RFC 5730|https://www.rfc-editor.org/rfc/rfc5730.html>.
 
 =cut
 
@@ -566,7 +566,7 @@ will be used.
 =item * C<lang> (OPTIONAL) - an arrayref containing language codes. It not
 provided, C<en> will be used as the only supported language.
 
-=item * C<objects> (REQUIRED) - an arrayref of namespace URIs for 
+=item * C<objects> (REQUIRED) - an arrayref of namespace URIs for
 
 =back
 
@@ -710,7 +710,7 @@ information about the session. It contains the following values:
 
 =item * C<objects> - an arrayref of the object URI(s) specified at login.
 
-=item * C<lang> - an arrayref of the extension URI(s) specified at login.
+=item * C<extensions> - an arrayref of the extension URI(s) specified at login.
 
 =item * C<client_cert> - a hashref containing information about the client
 certificate (if any), which looks something like this:
@@ -762,8 +762,8 @@ Example:
         }
     }
 
-C<Net::EPP::Server> will construct a standard EPP response frame using the result
-code and send it to the client.
+C<Net::EPP::Server> will construct a standard EPP response frame using the
+result code and send it to the client.
 
 =head4 2. RESULT CODE + MESSAGE
 
@@ -784,8 +784,8 @@ then the second can be a message. Example:
         }
     }
 
-C<Net::EPP::Server> will construct a standard EPP response frame using the result
-code and message, and send it to the client.
+C<Net::EPP::Server> will construct a standard EPP response frame using the
+result code and message, and send it to the client.
 
 =head4 3. RESULT CODE + XML ELEMENTS
 
@@ -807,8 +807,8 @@ Example:
         );
     }
 
-C<Net::EPP::Server> will construct a standard EPP response frame using the result
-code and supplied elements which will be imported and inserted into the
+C<Net::EPP::Server> will construct a standard EPP response frame using the
+result code and supplied elements which will be imported and inserted into the
 appropriate positions, and send it to the client.
 
 =head4 4. L<XML::LibXML::Document> OBJECT
@@ -818,8 +818,8 @@ back to the client verbatim.
 
 =head3 EXCEPTIONS
 
-C<Net::EPP::Server> will catch any exceptions thrown by the command handler, will
-C<carp($@)>, and then send a C<2400> result code back to the client.
+C<Net::EPP::Server> will catch any exceptions thrown by the command handler,
+will C<carp($@)>, and then send a C<2400> result code back to the client.
 
 =cut
 
@@ -960,12 +960,12 @@ described by C<%args>, which should contain the following:
 
 =over
 
-=item * C<code> (OPTIONAL) - the result code. See L<Net::EPP::ResponseCodes>. If
-not provided, C<1000> will be used.
+=item * C<code> (OPTIONAL) - the result code. See L<Net::EPP::ResponseCodes>.
+If not provided, C<1000> will be used.
 
 =item * C<msg> - a human-readable error message. If not provided, the string
-C<"Command completed successfully."> will be used if C<code> is less than C<2000>,
-and C<"Command failed."> if C<code> is C<2000> or higher.
+C<"Command completed successfully."> will be used if C<code> is less than
+C<2000>, and C<"Command failed."> if C<code> is C<2000> or higher.
 
 =item * C<resData> (OPTIONAL) - if defined, an empty C<E<lt>resDataE<gt>>
 element will be added to the frame.
@@ -1018,8 +1018,8 @@ sub generate_response {
 
 =head2 C<generate_error(%args)>
 
-This method is identical to C<generate_response()> except the default value for
-the C<code> parameter is C<2400>, indicating that the command failed for
+This method is identical to C<generate_response()> except the default value
+for the C<code> parameter is C<2400>, indicating that the command failed for
 unspecified reasons.
 
 =cut
