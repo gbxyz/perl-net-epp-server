@@ -408,7 +408,8 @@ sub process_frame {
         return $self->generate_greeting;
     }
 
-    my $clTRID = $frame->getElementsByTagName('clTRID')->item(0)->textContent;
+    my $clTRID = $frame->getElementsByTagName('clTRID')->item(0);
+    $clTRID = $clTRID->textContent if ($clTRID);
 
     my $command;
 
