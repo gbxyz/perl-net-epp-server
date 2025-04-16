@@ -332,9 +332,6 @@ sub main_loop_iteration {
 sub write_log {
     my ($self, $session, $command, $response) = @_;
 
-    use Data::Printer;
-    p $session;
-
     return unless exists($self->{'epp'}->{'log_dir'});
 
     my $dir = File::Spec->catdir(
