@@ -220,7 +220,7 @@ sub run {
 
     if ($self->{'epp'}->{'client_ca_file'}) {
         $args{'SSL_verify_mode'}    = SSL_VERIFY_FAIL_IF_NO_PEER_CERT;
-        $args{'SSL_ca_file'}        = $self->{'epp'}->{'client_ca_file'};
+        $args{'SSL_client_ca_file'} = $self->{'epp'}->{'client_ca_file'};
     }
 
     return $self->SUPER::run(%args);
