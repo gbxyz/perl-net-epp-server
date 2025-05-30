@@ -25,10 +25,12 @@ use base qw(Net::Server::PreFork);
 use bytes;
 use utf8;
 use open qw(:encoding(utf8));
-use feature qw(state);
-use vars qw(%MESSAGES);
+use feature qw(say state);
+use vars qw($VERSION %MESSAGES);
 use strict;
 use warnings;
+
+our $VERSION = '0.01';
 
 our %MESSAGES = (
     1000 => 'Command completed successfully.',
@@ -341,8 +343,8 @@ sub write_log {
 
     make_path($dir, { mode => 0700});
 
-    write_file(File::Spec->catfile($dir, sprintf(q{%016u-command.xml}, $session->{'counter'})), $command);
-    write_file(File::Spec->catfile($dir, sprintf(q{%016u-response.xml}, $session->{'counter'})), $response);
+    write_file(File::Spec->catfile($dir, sprintf('%016u-command.xml', $session->{'counter'})), $command);
+    write_file(File::Spec->catfile($dir, sprintf('%016u-response.xml', $session->{'counter'})), $response);
 }
 
 #
