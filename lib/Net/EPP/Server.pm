@@ -30,7 +30,7 @@ use vars qw($VERSION %MESSAGES $HELLO);
 use strict;
 use warnings;
 
-our $VERSION = '0.01';
+our $VERSION = '0.07';
 
 our %MESSAGES = (
     1000 => 'Command completed successfully.',
