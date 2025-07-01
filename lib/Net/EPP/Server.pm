@@ -1,4 +1,4 @@
-package Net::EPP::Server;
+wpackage Net::EPP::Server;
 # ABSTRACT: A simple EPP server implementation.
 use Carp;
 use Crypt::OpenSSL::Random;
@@ -30,7 +30,7 @@ use vars qw($VERSION %MESSAGES $HELLO);
 use strict;
 use warnings;
 
-our $VERSION = '0.08';
+our $VERSION = '0.09';
 
 our %MESSAGES = (
     1000 => 'Command completed successfully.',

@@ -1,5 +1,8 @@
 Revision history for perl module Net::EPP::Server:
 
+0.09 - 2025-07-01
+  - version bump because the v0.08 tarball was corrupted.
+
 0.08 - 2025-07-01
   - update this file with changes.
 
