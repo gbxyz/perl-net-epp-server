@@ -26,7 +26,7 @@ use bytes;
 use utf8;
 use open qw(:encoding(utf8));
 use feature qw(say state);
-use vars qw($VERSION %MESSAGES);
+use vars qw($VERSION %MESSAGES $HELLO);
 use strict;
 use warnings;
 
@@ -68,6 +68,10 @@ our %MESSAGES = (
     2501 => 'Authentication error; server closing connection.',
     2502 => 'Session limit exceeded; server closing connection.',
 );
+
+$HELLO = XML::LibXML::Document->new;
+$HELLO->setDocumentElement($HELLO->createElementNS($Net::EPP::Frame::EPP_URN, 'epp'));
+$HELLO->documentElement->appendChild($HELLO->createElement('hello'));
 
 =pod
 
@@ -610,19 +614,10 @@ provided, C<en> will be used as the only supported language.
 sub generate_greeting {
     my $self = shift;
 
-    state ($hello, $frame);
-
-    #
-    # this ensures that the hello handler always receives a valid EPP frame
-    #
-    if (!$hello) {
-        $hello = XML::LibXML::Document->new;
-        $hello->setDocumentElement($hello->createElementNS($Net::EPP::Frame::EPP_URN, 'epp'));
-        $hello->documentElement->appendChild($hello->createElement('hello'));
-    }
+    state $frame;
 
     if (!$frame) {
-        my $data = $self->run_callback(event => 'hello', frame => $hello);
+        my $data = $self->run_callback(event => 'hello', frame => $HELLO);
 
         $frame = XML::LibXML::Document->new;
 
