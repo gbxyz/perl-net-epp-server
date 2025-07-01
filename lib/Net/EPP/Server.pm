@@ -477,13 +477,39 @@ sub process_frame {
         );
     }
 
-    if (defined($session->{'clid'}) && 'login' eq $command) {
-        return $self->generate_error(
-            code    => AUTHENTICATION_ERROR,
-            msg     => 'You are already logged in.',
-            clTRID  => $clTRID,
-            svTRID  => $svTRID,
-        );
+    if ('login' eq $command) {
+        if (defined($session->{'clid'})) {
+            return $self->generate_error(
+                code    => AUTHENTICATION_ERROR,
+                msg     => 'You are already logged in.',
+                clTRID  => $clTRID,
+                svTRID  => $svTRID,
+            );
+        }
+
+        my $meta = $self->run_callback(event => 'hello', frame => $HELLO);
+
+        foreach my $uri (map { $_->textContent } $frame->getElementsByTagName('objURI')) {
+            if (none { $_ eq $uri } @{$meta->{objects}}) {
+                return $self->generate_error(
+                    code    => UNIMPLEMENTED_OBJECT_SERVICE,
+                    msg     => sprintf("This server does not support '%s' objects.", $uri),
+                    clTRID  => $clTRID,
+                    svTRID  => $svTRID,
+                );
+            }
+        }
+
+        foreach my $uri (map { $_->textContent } $frame->getElementsByTagName('extURI')) {
+            if (none { $_ eq $uri } @{$meta->{extensions}}) {
+                return $self->generate_error(
+                    code    => UNIMPLEMENTED_EXTENSION,
+                    msg     => sprintf("This server does not support the '%s' extension.", $uri),
+                    clTRID  => $clTRID,
+                    svTRID  => $svTRID,
+                );
+            }
+        }
     }
 
     if ('logout' eq $command) {
