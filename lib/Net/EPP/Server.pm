@@ -1,4 +1,4 @@
-wpackage Net::EPP::Server;
+package Net::EPP::Server;
 # ABSTRACT: A simple EPP server implementation.
 use Carp;
 use Crypt::OpenSSL::Random;
